@@ -43,11 +43,18 @@ function initWebSocketServer(http) {
      * Check every 30s if all sessions are alive
      * if the client does not responds with a pong after 30s, the respective connection is terminated (because isAlive is
      * false from the last execution)
+     * from the ws library readme
      */
     setInterval(function ping() {
         wss.clients.forEach(function each(ws) {
             let data = sessions.get(ws);
             if (data.isAlive === false) {
+                if (data.user) {
+                    console.log("connection with user " + data.user.name + " died");
+                }
+                else {
+                    console.log("unknown connection died");
+                }
                 return closeSession(ws);
             }
             data.isAlive = false;
@@ -66,23 +73,19 @@ function processMessage(request, session, ws) {
             return;
         }
         // just send the whole state on success
-        // TODO
         if (sendToken) {
             console.log("returning response with token");
         }
-        sendText(ws, request, {
-            requestId: request.requestId,
-            token: sendToken ? session.user.token : undefined,
-            runningGames: [],
-            closedGames: [],
-            users: []
-        });
+        let response = data_1.DataManager.getStatus(session.user);
+        if (sendToken) {
+            response.token = session.user.token;
+        }
+        sendText(ws, request, response);
     }).catch(reason => {
         console.log("returning error:");
         console.error(reason);
         sendText(ws, request, {
             error: reason,
-            requestId: request.requestId
         });
     });
 }
@@ -98,7 +101,6 @@ function handleRequest(request, session, ws) {
             console.log("user is not logged in");
             sendText(ws, request, {
                 error: 'not logged in',
-                requestId: request.requestId
             });
             closeSession(ws);
             return [false, false];
@@ -122,11 +124,20 @@ function handleRequest(request, session, ws) {
         return [true, false];
     });
 }
-function sendText(ws, request, response) {
+function sendText(ws, request, response, close) {
     response.requestId = request.requestId;
     ws.send(JSON.stringify(response));
+    if (close) {
+        closeSession(ws);
+    }
 }
 function closeSession(ws) {
+    if (sessions.has(ws)) {
+        console.log("closing session with user " + sessions.get(ws).user.name);
+    }
+    else {
+        console.log("closing unknown session");
+    }
     sessions.delete(ws);
     ws.terminate();
 }

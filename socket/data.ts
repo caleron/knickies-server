@@ -1,4 +1,4 @@
-import {Game, SessionData, Sheet, User} from "./types";
+import {Game, SessionData, Sheet, SocketResponse, User} from "./types";
 import {Database, SqliteDb} from '../custom-types/sqlite'
 import * as crypto from 'crypto'
 import moment = require("moment");
@@ -249,7 +249,7 @@ class Manager {
         } else {
             sheets = game.sheets;
         }
-        for (let sheet of sheets) {
+        for (const sheet of sheets) {
             let userTextCount: Map<string, number> = new Map();
             // init counter with 0
             for (let user of game.users) {
@@ -275,7 +275,7 @@ class Manager {
 
             // find the least text counts
             let minAmount: number = 10000000;
-            for (let count of userTextCount.values()) {
+            for (const count of userTextCount.values()) {
                 if (minAmount > count) {
                     minAmount = count
                 }
@@ -283,7 +283,7 @@ class Manager {
 
             // find the candidates with the least text counts
             let candidates: Array<string> = [];
-            for (let entry of userTextCount.entries()) {
+            for (const entry of userTextCount.entries()) {
                 if (entry[1] == minAmount) {
                     candidates.push(entry[0]);
                 }
@@ -291,6 +291,29 @@ class Manager {
             //finally determine the next text creator
             sheet.nextUser = candidates[getRandomInt(0, candidates.length)]
         }
+    }
+
+    getStatus(user: User): SocketResponse {
+        let response: SocketResponse = {
+            users: [],
+            closedGames: [],
+            runningGames: []
+        };
+        let username: string = user.name.toLowerCase();
+        this.users.forEach((value: User) => response.users.push(value.name));
+
+        // collect all running and closed games for the user
+        for (const game of this.games.values()) {
+            if (game.creator == username || game.users.indexOf(username) !== -1) {
+                if (game.running) {
+                    response.runningGames.push(game);
+                } else {
+                    response.closedGames.push(game)
+                }
+            }
+        }
+
+        return response;
     }
 }
 
