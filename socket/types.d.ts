@@ -1,3 +1,5 @@
+import {Moment} from "moment";
+
 export interface SocketRequest {
     action: 'login' | 'register' | 'createGame' | 'inviteUser' | 'addText'
     username?: string
@@ -5,18 +7,18 @@ export interface SocketRequest {
     token?: string
     newGame?: Game
     gameId?: number
-    sheetId?: number
+    sheetNumber?: number
     text?: string
     requestId: number
 }
 
 export interface SocketResponse {
-    error: string
+    error?: string
     token?: string
     requestId?: number
-    users: Array<string>
-    runningGames: Array<Game>
-    closedGames: Array<Game>
+    users?: Array<string>
+    runningGames?: Array<Game>
+    closedGames?: Array<Game>
 }
 
 export interface Game {
@@ -24,6 +26,7 @@ export interface Game {
     name: string
     running?: boolean
     users: Array<string>
+    closedTime?: Moment
     creator?: string
     sheetCount: number
     textCount: number
@@ -31,8 +34,9 @@ export interface Game {
 }
 
 export interface Sheet {
-    id: number
     gameId: number
+    number: number
+    nextUser: string
     texts: Array<SheetText>
 }
 

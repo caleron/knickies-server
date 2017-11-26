@@ -2,7 +2,7 @@ import * as WebSocket from "ws";
 import * as http from "http";
 import {SocketRequest, SocketResponse, User} from "./types";
 import {DataManager} from "./data";
-import crypto from 'crypto'
+import * as crypto from 'crypto'
 
 let wss: WebSocket.Server;
 
@@ -15,7 +15,7 @@ export function initWebSocketServer(http) {
         sessions.set(ws, {
             isAlive: true,
             isLoggedIn: false,
-            user: ''
+            user: null
         });
 
         ws.on('message', (message: WebSocket.Data) => {
@@ -23,7 +23,7 @@ export function initWebSocketServer(http) {
             sessions.get(ws).isAlive = true;
             console.log('received: %s', message);
             // handle request and send response
-            handleRequest(JSON.parse(message.toString()), sessions.get(ws), ws);
+            processMessage(JSON.parse(message.toString()), sessions.get(ws), ws);
         });
 
         ws.on('pong', () => {
@@ -50,71 +50,77 @@ export function initWebSocketServer(http) {
     }, 30000);
 }
 
+function processMessage(request: SocketRequest, session: SessionData, ws: WebSocket) {
+    handleRequest(request, session, ws).then(([sendResponse, sendToken]) => {
+        if (!sendResponse) {
+            return
+        }
+        // just send the whole state on success
+        // TODO
+        sendText(ws, request, {
+            requestId: request.requestId,
+            token: sendToken ? session.user.token : undefined,
+            runningGames: [],
+            closedGames: [],
+            users: []
+        } as SocketResponse);
+    }).catch(reason => {
+        sendText(ws, request, {
+            error: reason,
+            requestId: request.requestId
+        });
+    });
+}
 
-function handleRequest(request: SocketRequest, session: SessionData, ws: WebSocket): void {
+
+async function handleRequest(request: SocketRequest, session: SessionData, ws: WebSocket): Promise<[boolean, boolean]> {
     if (request.action == 'login') {
         let user: User;
-        let errorMessage: string;
         if (request.token && request.token.length > 5) {
             user = DataManager.findUserByToken(request.token);
             if (!user) {
-                errorMessage = 'invalid token'
+                throw  'invalid token'
             }
         } else {
             user = DataManager.findUserByName(request.username);
             if (!user) {
-                errorMessage = 'unknown user'
+                throw 'unknown user'
             } else if (user.password != request.password) {
-                user = null;
-                errorMessage = 'wrong password'
+                throw 'wrong password'
             }
         }
 
-        if (user == null) {
-            // send error response and terminate the connection
-            sendText(ws, request, {
-                    error: errorMessage,
-                    requestId: request.requestId
-                } as SocketResponse
-            );
-            return closeSession(ws);
-        } else {
-            // login is valid when user is not null here
-            session.isLoggedIn = true;
-            session.user = user.name;
-            user.token = crypto.randomBytes(20).toString('hex');
+        // login is valid when user is not null here
+        session.isLoggedIn = true;
+        session.user = user;
+        user.token = crypto.randomBytes(20).toString('hex');
 
-            sendText(ws, request, {
-                requestId: request.requestId,
-                token: user.token,
-                runningGames: [],
-                closedGames: [],
-                users: []
-            } as SocketResponse);
-
-        }
-        return;
+        return [true, true];
     } else if (!session.isLoggedIn) {
         // close session if neither logged in nor action is login
         sendText(ws, request, {
             error: 'not logged in',
             requestId: request.requestId
         } as SocketResponse);
-        return closeSession(ws);
+        closeSession(ws);
+        return [false, false];
     }
 
     switch (request.action) {
         case "addText":
-
+            await DataManager.addText(session.user.name, request.gameId, request.sheetNumber, request.text);
             break;
-
         case "createGame":
+            await DataManager.createGame(request.newGame.name, session.user.name, request.newGame.users, request.newGame.sheetCount, request.newGame.textCount);
             break;
         case "inviteUser":
+            await DataManager.inviteUser(request.gameId, request.username);
             break;
         case "register":
+            await DataManager.register(request.username, request.password);
             break;
     }
+    return [true, false];
 }
 
 function sendText(ws: WebSocket, request: SocketRequest, response: SocketResponse) {
@@ -131,5 +137,5 @@ function closeSession(ws: WebSocket) {
 interface SessionData {
     isAlive: boolean
     isLoggedIn: boolean
-    user: string
+    user: User
 }

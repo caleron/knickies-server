@@ -1,12 +1,14 @@
 import {Game, Sheet, User} from "./types";
 import {Database, SqliteDb} from '../custom-types/sqlite'
+import * as crypto from 'crypto'
+import moment = require("moment");
 
 let sqlite: SqliteDb = require('sqlite');
 
 class Manager {
     users: Map<string, User> = new Map();
     games: Map<number, Game> = new Map();
-    db: SqliteDb.Database;
+    db: Database;
 
     async init() {
         this.db = await sqlite.open('./data.db');
@@ -14,20 +16,33 @@ class Manager {
         await db.migrate({});
 
         // load all users
+        // language=SQLite
         let users = await db.all('SELECT name, password, token FROM users');
         for (let user of users) {
-            this.users.set(user.name, user);
+            this.users.set(user.name.toLowerCase(), user);
         }
 
         // load all games
-        let games = await db.all('SELECT id, name, running, creator, sheet_count as sheetCount, text_count as textCount from games');
+        // language=SQLite
+        let games = await db.all(`SELECT
+                                    id,
+                                    name,
+                                    running,
+                                    creator,
+                                    sheet_count AS sheetCount,
+                                    text_count  AS textCount,
+                                    closed_time AS closedTime
+                                  FROM games
+                                  ORDER BY closed_time`);
         for (let game of games) {
             game.users = [];
             game.sheets = [];
+            game.closedTime = moment(game.closedTime);
             this.games.set(game.id, game);
         }
 
         // load table game_user
+        // language=SQLite
         let gameUser: Array<{ game_id: number, user: string }> = await db.all('SELECT game_id, user FROM game_user');
         for (let entry of gameUser) {
             this.games.get(entry.game_id).users.push(entry.user);
@@ -36,16 +51,19 @@ class Manager {
 
         // load the sheets
         let sheets: Map<number, Sheet> = new Map();
-        await db.each('SELECT id, game_id as gameId FROM sheets', (err, row) => {
+        // language=SQLite
+        await db.each('SELECT game_id AS gameId, number FROM sheets', (err, row) => {
             sheets.set(row.id, {
-                id: row.id,
+                number: row.number,
                 gameId: row.gameId,
-                texts: []
+                texts: [],
+                nextUser: ''
             });
         });
 
         // load the texts of the sheets
-        await db.each('SELECT id, sheet_id, creator, text FROM sheet_text', (err, row) => {
+        // language=SQLite
+        await db.each('SELECT id, sheet_number, creator, text FROM sheet_text ORDER BY id ASC', (err, row) => {
             sheets.get(row.sheet_id).texts.push({
                 creator: row.creator,
                 text: row.text
@@ -59,21 +77,191 @@ class Manager {
     }
 
     findUserByName(name: string): User {
-        name = name.toLowerCase();
-        for (let user of this.users) {
-            if (user.name.toLowerCase() == name) {
-                return user;
-            }
-        }
+        return this.users.get(name.toLowerCase())
     }
 
     findUserByToken(token: string): User {
-        for (let user of this.users) {
+        for (let user of this.users.values()) {
             if (user.token == token) {
                 return user;
             }
         }
     }
+
+    async register(name: string, password: string): Promise<string> {
+        let newUser: User = {
+            games: [],
+            token: crypto.randomBytes(20).toString('hex'),
+            name,
+            password
+        };
+        if (this.users.has(name.toLowerCase())) {
+            throw 'user already exists'
+        }
+        this.users.set(name.toLowerCase(), newUser);
+        // insert the new user
+        // language=SQLite
+        await this.db.run('INSERT INTO users (name, password, token) VALUES (?,?,?)', newUser.name, newUser.password, newUser.token);
+        return newUser.token;
+    }
+
+    async createGame(name: string, creator: string, users: Array<string>, sheetCount: number, textCount: number): Promise<Game> {
+        // lower case all names
+        users = users.map(value => value.toLowerCase());
+        creator = creator.toLowerCase();
+
+        if (!users || !Array.isArray(users)) {
+            throw 'invalid users'
+        }
+        // add the creator of the game if missing
+        if (users.indexOf(creator) === -1) {
+            users.push(creator);
+        }
+        // throw some errors
+        if (sheetCount < 1) {
+            throw 'minimum 1 sheet'
+        }
+        if (textCount < 5) {
+            throw 'minimum 5 texts per sheet'
+        }
+        if (!users || !Array.isArray(users) || users.length < 2) {
+            throw 'minimum 2 users required'
+        }
+
+        let newGame: Game = {
+            name,
+            creator,
+            sheetCount,
+            textCount,
+            users,
+            running: true,
+            sheets: []
+        };
+        // insert the new game
+        // language=SQLite
+        let res = await this.db.run(`INSERT INTO games (name, running, creator, sheet_count, text_count)
+        VALUES (?, ?, ?, ?, ?)`, name, true, creator, sheetCount, textCount);
+
+        newGame.id = res.lastID;
+
+        // insert the game users
+        // language=SQLite
+        let stmt = await this.db.prepare('INSERT INTO game_user (game_id, user) VALUES (?,?)');
+        for (let user of users) {
+            await stmt.run(newGame.id, user);
+        }
+        await stmt.finalize();
+
+        // insert the sheets
+        // language=SQLite
+        stmt = await this.db.prepare('INSERT INTO sheets (game_id, number) VALUES (?,?)');
+        for (let i = 0; i < sheetCount; i++) {
+            await stmt.run(newGame.id, i);
+            // add the empty sheets also to the game
+            newGame.sheets.push({
+                number: i,
+                gameId: newGame.id,
+                texts: [],
+                nextUser: ''
+            });
+        }
+        await stmt.finalize();
+
+        // finally add the new game to the map and return it
+        this.games.set(res.lastID, newGame);
+        this.assignNextTextCreator(newGame);
+        return newGame;
+    }
+
+    async inviteUser(gameId: number, user: string) {
+        user = user.toLowerCase();
+        let game = this.games.get(gameId);
+
+        if (game.users.indexOf(user) !== -1) {
+            throw 'user already in game'
+        }
+        game.users.push(user);
+
+        // language=SQLite
+        await this.db.run('INSERT INTO game_user (game_id, user) VALUES (?,?)', gameId, user);
+    }
+
+    async addText(creator: string, gameId: number, sheetNumber: number, text: string): Promise<void> {
+        creator = creator.toLowerCase();
+
+        if (!this.games.has(gameId)) {
+            throw "unknown game id";
+        }
+
+        if (this.games.get(gameId).sheets.length <= sheetNumber) {
+            throw 'sheet number too big';
+        }
+
+        if (this.games.get(gameId).sheets[sheetNumber].nextUser != creator) {
+            throw 'not the users turn'
+        }
+
+        this.games.get(gameId).sheets[sheetNumber].texts.push({
+            creator,
+            text
+        });
+
+        // language=SQLite
+        await this.db.run('INSERT INTO sheet_text (game_id, sheet_number, creator, text) VALUES (?,?,?,?)',
+            gameId, sheetNumber, creator, text);
+    }
+
+    assignNextTextCreator(game: Game) {
+        for (let sheet of game.sheets) {
+            let userTextCount: Map<string, number> = new Map();
+            // init counter with 0
+            for (let user of game.users) {
+                userTextCount.set(user, 0);
+            }
+
+            for (let text of sheet.texts) {
+                // increment the
+                userTextCount.set(text.creator, userTextCount.get(text.creator) + 1);
+            }
+
+            // remove creator of last text from possible candidates
+            if (sheet.texts.length > 0) {
+                let lastText = sheet.texts[sheet.texts.length - 1];
+                userTextCount.delete(lastText.creator);
+            }
+
+            // remove also the creator of the text before the last text if more than 2 users are in the game
+            if (sheet.texts.length > 1 && game.users.length > 2) {
+                let prevLastText = sheet.texts[sheet.texts.length - 2];
+                userTextCount.delete(prevLastText.creator);
+            }
+
+            // find the least text counts
+            let minAmount: number = 10000000;
+            for (let count of userTextCount.values()) {
+                if (minAmount > count) {
+                    minAmount = count
+                }
+            }
+
+            // find the candidates with the least text counts
+            let candidates: Array<string> = [];
+            for (let entry of userTextCount.entries()) {
+                if (entry[1] == minAmount) {
+                    candidates.push(entry[0]);
+                }
+            }
+            //finally determine the next text creator
+            sheet.nextUser = candidates[getRandomInt(0, candidates.length)]
+        }
+    }
+}
+
+/**
+ * from https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random
+ */
+function getRandomInt(min: number, max: number): number {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 export let DataManager = new Manager();

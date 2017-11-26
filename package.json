@@ -11,15 +11,17 @@
     "debug": "~2.6.9",
     "express": "~4.15.5",
     "hbs": "~4.0.1",
+    "moment": "^2.19.2",
     "morgan": "~1.9.0",
     "serve-favicon": "~2.4.5",
     "sqlite": "^2.8.0",
-    "typescript": "^2.6.1",
     "ws": "^3.3.2"
   },
   "devDependencies": {
     "@types/body-parser": "^1.16.8",
     "@types/cookie-parser": "^1.4.1",
-    "@types/ws": "^3.2.0"
+    "@types/moment": "^2.13.0",
+    "@types/ws": "^3.2.0",
+    "typescript": "2.5.3"
   }
 }

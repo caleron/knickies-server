@@ -132,4 +132,5 @@ typings/
 # dotenv environment variables file
 .env
 
-
+socket/*.js
+*.js.map
