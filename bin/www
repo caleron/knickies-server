@@ -9,6 +9,7 @@ var debug = require('debug')('knickies:server');
 var http = require('http');
 var ws = require('../socket/server');
 
+debug.enabled = true;
 /**
  * Get port from environment and store in Express.
  */
@@ -25,12 +26,11 @@ var server = http.createServer(app);
 /**
  * Init the WebSocket server
  */
-ws.initWebSocketServer(server);
+ws.initWebSocketServer({server});
 
 /**
  * Listen on provided port, on all network interfaces.
  */
-
 server.listen(port);
 server.on('error', onError);
 server.on('listening', onListening);

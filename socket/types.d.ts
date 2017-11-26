@@ -51,3 +51,9 @@ export interface User {
     token: string
     games: Array<Game>
 }
+
+export interface SessionData {
+    isAlive: boolean
+    isLoggedIn: boolean
+    user: User
+}

@@ -1,4 +1,4 @@
-import {Game, Sheet, User} from "./types";
+import {Game, SessionData, Sheet, User} from "./types";
 import {Database, SqliteDb} from '../custom-types/sqlite'
 import * as crypto from 'crypto'
 import moment = require("moment");
@@ -11,7 +11,8 @@ class Manager {
     db: Database;
 
     async init() {
-        this.db = await sqlite.open('./data.db');
+        console.log("loading data");
+        this.db = await sqlite.open('./data.sqlite');
         let db: Database = this.db;
         await db.migrate({});
 
@@ -74,6 +75,7 @@ class Manager {
         for (let sheet of sheets.values()) {
             this.games.get(sheet.gameId).sheets.push(sheet);
         }
+        console.log("loading finished");
     }
 
     findUserByName(name: string): User {
@@ -86,6 +88,31 @@ class Manager {
                 return user;
             }
         }
+    }
+
+    async login(session: SessionData, username: string, password: string, token: string): Promise<void> {
+        let user: User;
+        if (token && token.length > 5) {
+            user = this.findUserByToken(token);
+            if (!user) {
+                throw  'invalid token'
+            }
+        } else {
+            user = this.findUserByName(username);
+            if (!user) {
+                throw 'unknown user'
+            } else if (user.password != password) {
+                throw 'wrong password'
+            }
+        }
+
+        // login is valid when user is not null here
+        session.isLoggedIn = true;
+        session.user = user;
+        user.token = crypto.randomBytes(20).toString('hex');
+
+        // language=SQLite
+        await this.db.run('UPDATE users SET token = ? WHERE name = ?;', user.token, user.name);
     }
 
     async register(name: string, password: string): Promise<string> {
@@ -169,7 +196,7 @@ class Manager {
 
         // finally add the new game to the map and return it
         this.games.set(res.lastID, newGame);
-        this.assignNextTextCreator(newGame);
+        Manager.assignNextTextCreator(newGame);
         return newGame;
     }
 
@@ -193,15 +220,17 @@ class Manager {
             throw "unknown game id";
         }
 
-        if (this.games.get(gameId).sheets.length <= sheetNumber) {
+        let game = this.games.get(gameId);
+        if (game.sheets.length <= sheetNumber) {
             throw 'sheet number too big';
         }
 
-        if (this.games.get(gameId).sheets[sheetNumber].nextUser != creator) {
+        let sheet = game.sheets[sheetNumber];
+        if (sheet.nextUser != creator) {
             throw 'not the users turn'
         }
 
-        this.games.get(gameId).sheets[sheetNumber].texts.push({
+        sheet.texts.push({
             creator,
             text
         });
@@ -209,10 +238,18 @@ class Manager {
         // language=SQLite
         await this.db.run('INSERT INTO sheet_text (game_id, sheet_number, creator, text) VALUES (?,?,?,?)',
             gameId, sheetNumber, creator, text);
+
+        Manager.assignNextTextCreator(game, sheet);
     }
 
-    assignNextTextCreator(game: Game) {
-        for (let sheet of game.sheets) {
+    static assignNextTextCreator(game: Game, sheet?: Sheet) {
+        let sheets: Array<Sheet>;
+        if (sheet) {
+            sheets = [sheet];
+        } else {
+            sheets = game.sheets;
+        }
+        for (let sheet of sheets) {
             let userTextCount: Map<string, number> = new Map();
             // init counter with 0
             for (let user of game.users) {

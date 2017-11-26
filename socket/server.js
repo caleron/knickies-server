@@ -10,12 +10,18 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 const WebSocket = require("ws");
 const data_1 = require("./data");
-const crypto = require("crypto");
 let wss;
 let sessions = new Map();
+let acceptConnections = false;
 function initWebSocketServer(http) {
     wss = new WebSocket.Server(http);
+    console.log("initialized websocket server");
     wss.on('connection', (ws, req) => {
+        if (!acceptConnections) {
+            console.log("refusing connection");
+            ws.terminate();
+        }
+        console.log("accepting connection");
         sessions.set(ws, {
             isAlive: true,
             isLoggedIn: false,
@@ -48,6 +54,10 @@ function initWebSocketServer(http) {
             ws.ping('', false, true);
         });
     }, 30000);
+    // start accepting connections when data is loaded
+    data_1.DataManager.init()
+        .then(() => acceptConnections = true)
+        .catch(console.log);
 }
 exports.initWebSocketServer = initWebSocketServer;
 function processMessage(request, session, ws) {
@@ -57,6 +67,9 @@ function processMessage(request, session, ws) {
         }
         // just send the whole state on success
         // TODO
+        if (sendToken) {
+            console.log("returning response with token");
+        }
         sendText(ws, request, {
             requestId: request.requestId,
             token: sendToken ? session.user.token : undefined,
@@ -65,6 +78,8 @@ function processMessage(request, session, ws) {
             users: []
         });
     }).catch(reason => {
+        console.log("returning error:");
+        console.error(reason);
         sendText(ws, request, {
             error: reason,
             requestId: request.requestId
@@ -73,31 +88,14 @@ function processMessage(request, session, ws) {
 }
 function handleRequest(request, session, ws) {
     return __awaiter(this, void 0, void 0, function* () {
+        console.log("handling request with action" + request.action);
         if (request.action == 'login') {
-            let user;
-            if (request.token && request.token.length > 5) {
-                user = data_1.DataManager.findUserByToken(request.token);
-                if (!user) {
-                    throw 'invalid token';
-                }
-            }
-            else {
-                user = data_1.DataManager.findUserByName(request.username);
-                if (!user) {
-                    throw 'unknown user';
-                }
-                else if (user.password != request.password) {
-                    throw 'wrong password';
-                }
-            }
-            // login is valid when user is not null here
-            session.isLoggedIn = true;
-            session.user = user;
-            user.token = crypto.randomBytes(20).toString('hex');
+            yield data_1.DataManager.login(session, request.username, request.password, request.token);
             return [true, true];
         }
         else if (!session.isLoggedIn) {
             // close session if neither logged in nor action is login
+            console.log("user is not logged in");
             sendText(ws, request, {
                 error: 'not logged in',
                 requestId: request.requestId
@@ -118,6 +116,8 @@ function handleRequest(request, session, ws) {
             case "register":
                 yield data_1.DataManager.register(request.username, request.password);
                 break;
+            default:
+                throw 'unknown action';
         }
         return [true, false];
     });

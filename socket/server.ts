@@ -1,17 +1,23 @@
 import * as WebSocket from "ws";
 import * as http from "http";
-import {SocketRequest, SocketResponse, User} from "./types";
+import {SessionData, SocketRequest, SocketResponse} from "./types";
 import {DataManager} from "./data";
-import * as crypto from 'crypto'
 
 let wss: WebSocket.Server;
 
 let sessions: Map<WebSocket, SessionData> = new Map();
+let acceptConnections = false;
 
 export function initWebSocketServer(http) {
     wss = new WebSocket.Server(http);
+    console.log("initialized websocket server");
 
     wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
+        if (!acceptConnections) {
+            console.log("refusing connection");
+            ws.terminate();
+        }
+        console.log("accepting connection");
         sessions.set(ws, {
             isAlive: true,
             isLoggedIn: false,
@@ -48,6 +54,11 @@ export function initWebSocketServer(http) {
             ws.ping('', false, true);
         });
     }, 30000);
+
+    // start accepting connections when data is loaded
+    DataManager.init()
+        .then(() => acceptConnections = true)
+        .catch(console.log);
 }
 
 function processMessage(request: SocketRequest, session: SessionData, ws: WebSocket) {
@@ -57,6 +68,9 @@ function processMessage(request: SocketRequest, session: SessionData, ws: WebSoc
         }
         // just send the whole state on success
         // TODO
+        if (sendToken) {
+            console.log("returning response with token");
+        }
         sendText(ws, request, {
             requestId: request.requestId,
             token: sendToken ? session.user.token : undefined,
@@ -65,6 +79,8 @@ function processMessage(request: SocketRequest, session: SessionData, ws: WebSoc
             users: []
         } as SocketResponse);
     }).catch(reason => {
+        console.log("returning error:");
+        console.error(reason);
         sendText(ws, request, {
             error: reason,
             requestId: request.requestId
@@ -74,30 +90,15 @@ function processMessage(request: SocketRequest, session: SessionData, ws: WebSoc
 
 
 async function handleRequest(request: SocketRequest, session: SessionData, ws: WebSocket): Promise<[boolean, boolean]> {
+    console.log("handling request with action" + request.action);
     if (request.action == 'login') {
-        let user: User;
-        if (request.token && request.token.length > 5) {
-            user = DataManager.findUserByToken(request.token);
-            if (!user) {
-                throw  'invalid token'
-            }
-        } else {
-            user = DataManager.findUserByName(request.username);
-            if (!user) {
-                throw 'unknown user'
-            } else if (user.password != request.password) {
-                throw 'wrong password'
-            }
-        }
 
-        // login is valid when user is not null here
-        session.isLoggedIn = true;
-        session.user = user;
-        user.token = crypto.randomBytes(20).toString('hex');
+        await DataManager.login(session, request.username, request.password, request.token);
 
         return [true, true];
     } else if (!session.isLoggedIn) {
         // close session if neither logged in nor action is login
+        console.log("user is not logged in");
         sendText(ws, request, {
             error: 'not logged in',
             requestId: request.requestId
@@ -119,6 +120,8 @@ async function handleRequest(request: SocketRequest, session: SessionData, ws: W
         case "register":
             await DataManager.register(request.username, request.password);
             break;
+        default:
+            throw 'unknown action';
     }
     return [true, false];
 }
@@ -132,10 +135,4 @@ function sendText(ws: WebSocket, request: SocketRequest, response: SocketRespons
 function closeSession(ws: WebSocket) {
     sessions.delete(ws);
     ws.terminate();
-}
-
-interface SessionData {
-    isAlive: boolean
-    isLoggedIn: boolean
-    user: User
 }
