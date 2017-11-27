@@ -9,10 +9,11 @@ export interface SocketRequest {
     gameId?: number
     sheetNumber?: number
     text?: string
-    requestId: number
+    requestId?: number
 }
 
 export interface SocketResponse {
+    currentUser?: string
     error?: string
     token?: string
     requestId?: number

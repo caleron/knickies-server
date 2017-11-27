@@ -2,7 +2,6 @@ import * as WebSocket from "ws";
 import * as http from "http";
 import {SessionData, SocketRequest, SocketResponse} from "./types";
 import {DataManager} from "./data";
-import {Data} from "ws";
 
 let wss: WebSocket.Server;
 
@@ -74,13 +73,12 @@ function processMessage(request: SocketRequest, session: SessionData, ws: WebSoc
             return
         }
         // just send the whole state on success
-        if (sendToken) {
-            console.log("returning response with token");
-        }
         let response: SocketResponse = DataManager.getStatus(session.user);
         if (sendToken) {
+            console.log("returning response with token");
             response.token = session.user.token;
         }
+        response.currentUser = session.user.name;
         sendText(ws, request, response);
     }).catch(reason => {
         console.log("returning error:");
@@ -93,10 +91,30 @@ function processMessage(request: SocketRequest, session: SessionData, ws: WebSoc
 
 
 async function handleRequest(request: SocketRequest, session: SessionData, ws: WebSocket): Promise<[boolean, boolean]> {
-    console.log("handling request with action" + request.action);
+    console.log("handling request with action " + request.action);
     if (request.action == 'login') {
 
-        await DataManager.login(session, request.username, request.password, request.token);
+        try {
+            await DataManager.login(session, request.username, request.password, request.token);
+        } catch (e) {
+            console.log('login failed: ' + e);
+            sendText(ws, request, {
+                error: e
+            }, true);
+            return [false, false]
+        }
+
+        return [true, true];
+    } else if (request.action == 'register') {
+        try {
+            await DataManager.register(request.username, request.password, session);
+        } catch (e) {
+            console.log('register failed: ' + e);
+            sendText(ws, request, {
+                error: e
+            }, true);
+            return [false, false]
+        }
 
         return [true, true];
     } else if (!session.isLoggedIn) {
@@ -119,9 +137,6 @@ async function handleRequest(request: SocketRequest, session: SessionData, ws: W
         case "inviteUser":
             await DataManager.inviteUser(request.gameId, request.username);
             break;
-        case "register":
-            await DataManager.register(request.username, request.password);
-            break;
         default:
             throw 'unknown action';
     }
@@ -138,7 +153,7 @@ function sendText(ws: WebSocket, request: SocketRequest, response: SocketRespons
 }
 
 function closeSession(ws: WebSocket) {
-    if (sessions.has(ws)) {
+    if (sessions.has(ws) && sessions.get(ws).user) {
         console.log("closing session with user " + sessions.get(ws).user.name);
     } else {
         console.log("closing unknown session");

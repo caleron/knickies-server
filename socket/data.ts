@@ -20,6 +20,7 @@ class Manager {
         // language=SQLite
         let users = await db.all('SELECT name, password, token FROM users');
         for (let user of users) {
+            user.games = [];
             this.users.set(user.name.toLowerCase(), user);
         }
 
@@ -51,12 +52,16 @@ class Manager {
         }
 
         // load the sheets
-        let sheets: Map<number, Sheet> = new Map();
+        // maps game id to the list of sheets
+        let sheets: Map<number, Array<Sheet>> = new Map();
         // language=SQLite
         await db.each('SELECT game_id AS gameId, number FROM sheets', (err, row) => {
-            sheets.set(row.id, {
-                number: row.number,
+            if (!sheets.has(row.gameId)) {
+                sheets.set(row.gameId, []);
+            }
+            sheets.get(row.gameId).push({
                 gameId: row.gameId,
+                number: row.number,
                 texts: [],
                 nextUser: ''
             });
@@ -64,16 +69,21 @@ class Manager {
 
         // load the texts of the sheets
         // language=SQLite
-        await db.each('SELECT id, sheet_number, creator, text FROM sheet_text ORDER BY id ASC', (err, row) => {
-            sheets.get(row.sheet_id).texts.push({
+        await db.each('SELECT id, sheet_number, creator, text, game_id AS gameId FROM sheet_text ORDER BY id ASC', (err, row) => {
+            sheets.get(row.gameId)[row.sheet_number].texts.push({
                 creator: row.creator,
                 text: row.text
             })
         });
 
         // finally assign the sheets to the games
-        for (let sheet of sheets.values()) {
-            this.games.get(sheet.gameId).sheets.push(sheet);
+        for (let gameSheets of sheets.values()) {
+            for (let sheet of gameSheets) {
+                this.games.get(sheet.gameId).sheets.push(sheet);
+            }
+        }
+        for (let game of this.games.values()) {
+            Manager.assignNextTextCreator(game)
         }
         console.log("loading finished");
     }
@@ -109,13 +119,15 @@ class Manager {
         // login is valid when user is not null here
         session.isLoggedIn = true;
         session.user = user;
-        user.token = crypto.randomBytes(20).toString('hex');
-
-        // language=SQLite
-        await this.db.run('UPDATE users SET token = ? WHERE name = ?;', user.token, user.name);
+        if (!(token && token.length > 5)) {
+            // only generate new token if necessary
+            user.token = crypto.randomBytes(20).toString('hex');
+            // language=SQLite
+            await this.db.run('UPDATE users SET token = ? WHERE name = ?;', user.token, user.name);
+        }
     }
 
-    async register(name: string, password: string): Promise<string> {
+    async register(name: string, password: string, session: SessionData): Promise<string> {
         let newUser: User = {
             games: [],
             token: crypto.randomBytes(20).toString('hex'),
@@ -125,10 +137,13 @@ class Manager {
         if (this.users.has(name.toLowerCase())) {
             throw 'user already exists'
         }
-        this.users.set(name.toLowerCase(), newUser);
         // insert the new user
         // language=SQLite
         await this.db.run('INSERT INTO users (name, password, token) VALUES (?,?,?)', newUser.name, newUser.password, newUser.token);
+
+        this.users.set(name.toLowerCase(), newUser);
+        session.isLoggedIn = true;
+        session.user = newUser;
         return newUser.token;
     }
 
@@ -243,12 +258,7 @@ class Manager {
     }
 
     static assignNextTextCreator(game: Game, sheet?: Sheet) {
-        let sheets: Array<Sheet>;
-        if (sheet) {
-            sheets = [sheet];
-        } else {
-            sheets = game.sheets;
-        }
+        let sheets: Array<Sheet> = sheet ? [sheet] : game.sheets;
         for (const sheet of sheets) {
             let userTextCount: Map<string, number> = new Map();
             // init counter with 0
@@ -289,8 +299,11 @@ class Manager {
                 }
             }
             //finally determine the next text creator
-            sheet.nextUser = candidates[getRandomInt(0, candidates.length)]
+            let candidateIndex = getRandomInt(0, candidates.length - 1);
+            sheet.nextUser = candidates[candidateIndex];
+            console.log(`game ${game.id}: chose user ${sheet.nextUser} out of ${candidates.length} candidates`)
         }
+        // TODO push to next user if he has an active connection
     }
 
     getStatus(user: User): SocketResponse {
