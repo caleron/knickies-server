@@ -135,3 +135,4 @@ typings/
 socket/*.js
 *.js.map
 *.sqlite
+public/

@@ -78,7 +78,6 @@ function processMessage(request: SocketRequest, session: SessionData, ws: WebSoc
             console.log("returning response with token");
             response.token = session.user.token;
         }
-        response.currentUser = session.user.name;
         sendText(ws, request, response);
     }).catch(reason => {
         console.log("returning error:");
@@ -143,8 +142,24 @@ async function handleRequest(request: SocketRequest, session: SessionData, ws: W
     return [true, false];
 }
 
+export function pushStatusToUser(user: Array<string>) {
+    console.log(`should push to ${JSON.stringify(user)}`);
+    // sends the current status to each connected user in the array
+    for (const pair of sessions.entries()) {
+        const session: SessionData = pair[1];
+        const ws: WebSocket = pair[0];
+        if (user.indexOf(session.user.name.toLowerCase()) !== -1) {
+            console.log(`pushing status to ${session.user.name}`);
+            let response: SocketResponse = DataManager.getStatus(session.user);
+            sendText(ws, null, response);
+        }
+    }
+}
+
 function sendText(ws: WebSocket, request: SocketRequest, response: SocketResponse, close?: boolean) {
-    response.requestId = request.requestId;
+    if (request) {
+        response.requestId = request.requestId;
+    }
 
     ws.send(JSON.stringify(response));
     if (close) {

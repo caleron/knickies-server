@@ -1,6 +1,7 @@
 import {Game, SessionData, Sheet, SocketResponse, User} from "./types";
 import {Database, SqliteDb} from '../custom-types/sqlite'
 import * as crypto from 'crypto'
+import {pushStatusToUser} from "./server";
 import moment = require("moment");
 
 let sqlite: SqliteDb = require('sqlite');
@@ -212,6 +213,8 @@ class Manager {
         // finally add the new game to the map and return it
         this.games.set(res.lastID, newGame);
         Manager.assignNextTextCreator(newGame);
+        // also push status to new users
+        pushStatusToUser(newGame.users);
         return newGame;
     }
 
@@ -254,11 +257,54 @@ class Manager {
         await this.db.run('INSERT INTO sheet_text (game_id, sheet_number, creator, text) VALUES (?,?,?,?)',
             gameId, sheetNumber, creator, text);
 
-        Manager.assignNextTextCreator(game, sheet);
+        // check if game is finished
+        let allFinished = true;
+        for (const sheet of game.sheets) {
+            if (sheet.texts.length < game.textCount) {
+                allFinished = false;
+                break;
+            }
+        }
+
+        if (allFinished) {
+            game.running = false;
+            let now = moment().format("YYYY-MM-DD HH:mm:ss");
+            // language=SQLite
+            await this.db.run('UPDATE games SET running = FALSE, closed_time = ? WHERE id = ?', now, gameId);
+        }
+
+        let users = Manager.assignNextTextCreator(game, sheet);
+        pushStatusToUser(users);
     }
 
-    static assignNextTextCreator(game: Game, sheet?: Sheet) {
+    /**
+     *
+     * @param {Game} game
+     * @param {Sheet} sheet
+     * @returns {Array<string>} the users which were assigned to a sheet
+     */
+    static assignNextTextCreator(game: Game, sheet?: Sheet): Array<string> {
         let sheets: Array<Sheet> = sheet ? [sheet] : game.sheets;
+        let pushUsers: Array<string> = [];
+        let freshGame: boolean = true;
+        for (const sheet of sheets) {
+            if (sheet.texts.length !== 0) {
+                freshGame = false;
+                break;
+            }
+        }
+        if (freshGame) {
+            console.log(`game ${game.id} is fresh`);
+            // on a fresh game, assign the next users evenly, not randomly
+            for (let i = 0; i < sheets.length; i++) {
+                const sheet = sheets[i];
+                sheet.nextUser = game.users[i % game.users.length];
+                pushUsers.push(sheet.nextUser);
+                console.log(`game ${game.id}: chose user ${sheet.nextUser} out of ${game.users.length} users`)
+            }
+            return;
+        }
+
         for (const sheet of sheets) {
             let userTextCount: Map<string, number> = new Map();
             // init counter with 0
@@ -301,16 +347,18 @@ class Manager {
             //finally determine the next text creator
             let candidateIndex = getRandomInt(0, candidates.length - 1);
             sheet.nextUser = candidates[candidateIndex];
+            pushUsers.push(sheet.nextUser);
             console.log(`game ${game.id}: chose user ${sheet.nextUser} out of ${candidates.length} candidates`)
         }
-        // TODO push to next user if he has an active connection
+        return pushUsers;
     }
 
     getStatus(user: User): SocketResponse {
         let response: SocketResponse = {
             users: [],
             closedGames: [],
-            runningGames: []
+            runningGames: [],
+            currentUser: user.name
         };
         let username: string = user.name.toLowerCase();
         this.users.forEach((value: User) => response.users.push(value.name));
