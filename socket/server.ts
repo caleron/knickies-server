@@ -149,9 +149,17 @@ export function pushStatusToUser(user: Array<string>) {
         const session: SessionData = pair[1];
         const ws: WebSocket = pair[0];
         if (user.indexOf(session.user.name.toLowerCase()) !== -1) {
-            console.log(`pushing status to ${session.user.name}`);
             let response: SocketResponse = DataManager.getStatus(session.user);
-            sendText(ws, null, response);
+            if (ws.readyState == WebSocket.OPEN) {
+                console.log(`pushing status to ${session.user.name}`);
+                try {
+                    sendText(ws, null, response);
+                } catch (e) {
+                    console.log(`caught error while pushing to ${session.user.name}`, e)
+                }
+            } else {
+                console.log(`connection to ${session.user.name} not open`);
+            }
         }
     }
 }
