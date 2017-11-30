@@ -306,6 +306,12 @@ class Manager {
         }
 
         for (const sheet of sheets) {
+            if (sheet.texts.length >= game.sheetCount) {
+                sheet.nextUser = '';
+                console.log(`sheet ${sheet.number} of game ${game.id} finished`);
+                continue;
+            }
+
             let userTextCount: Map<string, number> = new Map();
             // init counter with 0
             for (let user of game.users) {
