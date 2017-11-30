@@ -148,7 +148,7 @@ export function pushStatusToUser(user: Array<string>) {
     for (const pair of sessions.entries()) {
         const session: SessionData = pair[1];
         const ws: WebSocket = pair[0];
-        if (user.indexOf(session.user.name.toLowerCase()) !== -1) {
+        if (session && session.user && session.user.name && user.indexOf(session.user.name.toLowerCase()) !== -1) {
             let response: SocketResponse = DataManager.getStatus(session.user);
             if (ws.readyState == WebSocket.OPEN) {
                 console.log(`pushing status to ${session.user.name}`);
