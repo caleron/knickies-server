@@ -48,8 +48,16 @@ class Manager {
         // language=SQLite
         let gameUser: Array<{ game_id: number, user: string }> = await db.all('SELECT game_id, user FROM game_user');
         for (let entry of gameUser) {
-            this.games.get(entry.game_id).users.push(entry.user);
-            this.users.get(entry.user).games.push(this.games.get(entry.game_id));
+            if (this.games.get(entry.game_id)) {
+                this.games.get(entry.game_id).users.push(entry.user);
+            } else {
+                console.log(`cant find game ${entry.game_id}`);
+            }
+            if (this.users.get(entry.user)) {
+                this.users.get(entry.user).games.push(this.games.get(entry.game_id));
+            } else {
+                console.log(`cant find user ${entry.user}`);
+            }
         }
 
         // load the sheets
@@ -131,6 +139,7 @@ class Manager {
             // language=SQLite
             await this.db.run('UPDATE users SET token = ? WHERE name = ?;', user.token, user.name);
         }
+        console.log(`login successful for user ${user.name}`);
     }
 
     async register(name: string, password: string, session: SessionData): Promise<string> {
@@ -228,11 +237,11 @@ class Manager {
         let game = this.games.get(gameId);
         for (let user of users) {
             user = user.toLowerCase();
-            if (game.users.indexOf(user) === -1) {
+            if (user != null && game.users.indexOf(user) === -1) {
                 game.users.push(user);
+                // language=SQLite
+                await this.db.run('INSERT INTO game_user (game_id, user) VALUES (?,?)', gameId, user);
             }
-            // language=SQLite
-            await this.db.run('INSERT INTO game_user (game_id, user) VALUES (?,?)', gameId, users);
         }
     }
 
@@ -311,7 +320,7 @@ class Manager {
         }
 
         for (const sheet of sheets) {
-            if (sheet.texts.length >= game.sheetCount) {
+            if (sheet.texts.length >= game.textCount) {
                 sheet.nextUser = '';
                 console.log(`sheet ${sheet.number} of game ${game.id} finished`);
                 continue;
