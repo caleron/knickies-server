@@ -39,6 +39,7 @@ export interface Sheet {
     gameId: number
     number: number
     nextUser: string
+    assignTime: number
     texts: Array<SheetText>
 }
 

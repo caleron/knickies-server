@@ -64,7 +64,8 @@ class Manager {
                 gameId: row.gameId,
                 number: row.number,
                 texts: [],
-                nextUser: ''
+                nextUser: '',
+                assignTime: 0
             });
         });
 
@@ -88,6 +89,9 @@ class Manager {
                 Manager.assignNextTextCreator(game)
         }
         console.log("loading finished");
+
+        // execute every 10 mins
+        setInterval(this.checkAssignTimes, 10 * 60 * 1000)
     }
 
     findUserByName(name: string): User {
@@ -206,7 +210,8 @@ class Manager {
                 number: i,
                 gameId: newGame.id,
                 texts: [],
-                nextUser: ''
+                nextUser: '',
+                assignTime: 0
             });
         }
         await stmt.finalize();
@@ -319,7 +324,7 @@ class Manager {
             }
 
             for (let text of sheet.texts) {
-                // increment the
+                // count the number of texts each user has written
                 userTextCount.set(text.creator, userTextCount.get(text.creator) + 1);
             }
 
@@ -333,6 +338,11 @@ class Manager {
             if (sheet.texts.length > 1 && game.users.length > 2) {
                 let prevLastText = sheet.texts[sheet.texts.length - 2];
                 userTextCount.delete(prevLastText.creator);
+            }
+
+            // remove also the last assigned creator (only available if assignTime is more than 24 hours ago)
+            if (sheet.nextUser && sheet.nextUser.length > 0 && userTextCount.size > 0) {
+                userTextCount.delete(sheet.nextUser);
             }
 
             // find the least text counts
@@ -353,6 +363,7 @@ class Manager {
             //finally determine the next text creator
             let candidateIndex = getRandomInt(0, candidates.length - 1);
             sheet.nextUser = candidates[candidateIndex];
+            sheet.assignTime = new Date().getTime();
             pushUsers.push(sheet.nextUser);
             console.log(`game ${game.id}: chose user ${sheet.nextUser} out of ${candidates.length} candidates`)
         }
@@ -381,6 +392,21 @@ class Manager {
         }
 
         return response;
+    }
+
+    checkAssignTimes() {
+        console.log("checking for timed-out user assignments");
+        let hours24Ago: number = new Date().getTime() - (24 * 60 * 60 * 1000);
+        for (let game of this.games.values()) {
+            if (game.running) {
+                for (let sheet of game.sheets) {
+                    if (sheet.assignTime < hours24Ago) {
+                        console.log(`game ${game.id} sheet ${sheet.number}: user ${sheet.nextUser} expired`);
+                        Manager.assignNextTextCreator(game, sheet)
+                    }
+                }
+            }
+        }
     }
 }
 
