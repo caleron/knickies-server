@@ -134,7 +134,7 @@ async function handleRequest(request: SocketRequest, session: SessionData, ws: W
             await DataManager.createGame(request.newGame.name, session.user.name, request.newGame.users, request.newGame.sheetCount, request.newGame.textCount);
             break;
         case "inviteUser":
-            await DataManager.inviteUser(request.gameId, request.username);
+            await DataManager.inviteUser(request.gameId, request.users);
             break;
         default:
             throw 'unknown action';

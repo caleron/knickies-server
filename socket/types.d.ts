@@ -10,6 +10,7 @@ export interface SocketRequest {
     sheetNumber?: number
     text?: string
     requestId?: number
+    users: Array<string>
 }
 
 export interface SocketResponse {

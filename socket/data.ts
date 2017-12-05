@@ -84,7 +84,8 @@ class Manager {
             }
         }
         for (let game of this.games.values()) {
-            Manager.assignNextTextCreator(game)
+            if (game.running)
+                Manager.assignNextTextCreator(game)
         }
         console.log("loading finished");
     }
@@ -218,17 +219,16 @@ class Manager {
         return newGame;
     }
 
-    async inviteUser(gameId: number, user: string) {
-        user = user.toLowerCase();
+    async inviteUser(gameId: number, users: Array<string>) {
         let game = this.games.get(gameId);
-
-        if (game.users.indexOf(user) !== -1) {
-            throw 'user already in game'
+        for (let user of users) {
+            user = user.toLowerCase();
+            if (game.users.indexOf(user) === -1) {
+                game.users.push(user);
+            }
+            // language=SQLite
+            await this.db.run('INSERT INTO game_user (game_id, user) VALUES (?,?)', gameId, users);
         }
-        game.users.push(user);
-
-        // language=SQLite
-        await this.db.run('INSERT INTO game_user (game_id, user) VALUES (?,?)', gameId, user);
     }
 
     async addText(creator: string, gameId: number, sheetNumber: number, text: string): Promise<void> {
