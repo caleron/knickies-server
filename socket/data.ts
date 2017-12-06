@@ -99,7 +99,7 @@ class Manager {
         console.log("loading finished");
 
         // execute every 10 mins
-        setInterval(this.checkAssignTimes, 10 * 60 * 1000)
+        setInterval(this.checkAssignTimes.bind(this), 10 * 60 * 1000)
     }
 
     findUserByName(name: string): User {
