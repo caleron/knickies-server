@@ -93,6 +93,7 @@ class Manager {
             }
         }
         for (let game of this.games.values()) {
+            await this.checkGameFinished(game);
             if (game.running)
                 Manager.assignNextTextCreator(game)
         }
@@ -262,6 +263,9 @@ class Manager {
             throw 'not the users turn'
         }
 
+        // reset immediately to prevent double-inserted messages while sqlite queries
+        sheet.nextUser = '';
+
         sheet.texts.push({
             creator,
             text
@@ -270,6 +274,16 @@ class Manager {
         // language=SQLite
         await this.db.run('INSERT INTO sheet_text (game_id, sheet_number, creator, text) VALUES (?,?,?,?)',
             gameId, sheetNumber, creator, text);
+
+        await this.checkGameFinished(game);
+
+        let users = Manager.assignNextTextCreator(game, sheet);
+        pushStatusToUser(users);
+    }
+
+    async checkGameFinished(game: Game) {
+        if (!game.running)
+            return;
 
         // check if game is finished
         let allFinished = true;
@@ -281,14 +295,12 @@ class Manager {
         }
 
         if (allFinished) {
+            console.log(`game ${game.id} finished`);
             game.running = false;
             let now = moment().format("YYYY-MM-DD HH:mm:ss");
             // language=SQLite
-            await this.db.run('UPDATE games SET running = FALSE, closed_time = ? WHERE id = ?', now, gameId);
+            await this.db.run('UPDATE games SET running = FALSE, closed_time = ? WHERE id = ?', now, game.id);
         }
-
-        let users = Manager.assignNextTextCreator(game, sheet);
-        pushStatusToUser(users);
     }
 
     /**
