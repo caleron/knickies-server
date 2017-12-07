@@ -299,7 +299,7 @@ class Manager {
             game.running = false;
             let now = moment().format("YYYY-MM-DD HH:mm:ss");
             // language=SQLite
-            await this.db.run('UPDATE games SET running = FALSE, closed_time = ? WHERE id = ?', now, game.id);
+            await this.db.run('UPDATE games SET running = 0, closed_time = ? WHERE id = ?', now, game.id);
         }
     }
 
