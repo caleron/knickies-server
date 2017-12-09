@@ -1,7 +1,7 @@
 import {Moment} from "moment";
 
 export interface SocketRequest {
-    action: 'login' | 'register' | 'createGame' | 'inviteUser' | 'addText'
+    action: 'login' | 'register' | 'createGame' | 'inviteUser' | 'addText' | 'setGameName'
     username?: string
     password?: string
     token?: string
@@ -11,6 +11,7 @@ export interface SocketRequest {
     text?: string
     requestId?: number
     users: Array<string>
+    name?: string
 }
 
 export interface SocketResponse {

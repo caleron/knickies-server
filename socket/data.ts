@@ -415,6 +415,15 @@ class Manager {
         return response;
     }
 
+    async setGameName(gameId: number, name: string) {
+        if (!this.games.has(gameId)) {
+            throw 'game does not exist'
+        }
+        this.games.get(gameId).name = name;
+        // language=SQLite
+        await this.db.run("UPDATE games SET name = ? WHERE id = ?", name, gameId)
+    }
+
     checkAssignTimes() {
         console.log("checking for timed-out user assignments");
         let hours24Ago: number = new Date().getTime() - (24 * 60 * 60 * 1000);

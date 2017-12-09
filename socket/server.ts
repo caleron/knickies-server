@@ -136,6 +136,9 @@ async function handleRequest(request: SocketRequest, session: SessionData, ws: W
         case "inviteUser":
             await DataManager.inviteUser(request.gameId, request.users);
             break;
+        case "setGameName":
+            await DataManager.setGameName(request.gameId, request.name);
+            break;
         default:
             throw 'unknown action';
     }
@@ -165,10 +168,12 @@ export function pushStatusToUser(user: Array<string>) {
 }
 
 function sendText(ws: WebSocket, request: SocketRequest, response: SocketResponse, close?: boolean) {
+    if (ws.readyState != WebSocket.OPEN) {
+        return
+    }
     if (request) {
         response.requestId = request.requestId;
     }
-
     ws.send(JSON.stringify(response));
     if (close) {
         closeSession(ws);
