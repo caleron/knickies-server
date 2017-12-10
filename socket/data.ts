@@ -41,15 +41,21 @@ class Manager {
             game.users = [];
             game.sheets = [];
             game.closedTime = moment(game.closedTime);
+            game.expiredUsers = [];
             this.games.set(game.id, game);
         }
 
         // load table game_user
         // language=SQLite
-        let gameUser: Array<{ game_id: number, user: string }> = await db.all('SELECT game_id, user FROM game_user');
+        let gameUser: Array<{ game_id: number, user: string, excluded: boolean }>
+            = await db.all('SELECT game_id, user, excluded FROM game_user');
         for (let entry of gameUser) {
             if (this.games.get(entry.game_id)) {
                 this.games.get(entry.game_id).users.push(entry.user);
+                // add to excluded users
+                if (entry.excluded) {
+                    this.games.get(entry.game_id).expiredUsers.push(entry.user)
+                }
             } else {
                 console.log(`cant find game ${entry.game_id}`);
             }
@@ -321,12 +327,18 @@ class Manager {
         }
         if (freshGame) {
             console.log(`game ${game.id} is fresh`);
+            // only consider non-expired users
+            let candidates: Array<string> = game.users.filter(value => game.expiredUsers.indexOf(value) === -1);
+            if (candidates.length == 0)
+                candidates = game.users;
+
             // on a fresh game, assign the next users evenly, not randomly
             for (let i = 0; i < sheets.length; i++) {
                 const sheet = sheets[i];
-                sheet.nextUser = game.users[i % game.users.length];
+                sheet.nextUser = candidates[i % candidates.length];
+                sheet.assignTime = Date.now();
                 pushUsers.push(sheet.nextUser);
-                console.log(`game ${game.id}: chose user ${sheet.nextUser} out of ${game.users.length} users`)
+                console.log(`game ${game.id}: chose user ${sheet.nextUser} out of ${candidates.length} users`)
             }
             return;
         }
@@ -349,20 +361,27 @@ class Manager {
                 userTextCount.set(text.creator, userTextCount.get(text.creator) + 1);
             }
 
+            // remove excluded users
+            for (let user of game.expiredUsers) {
+                if (userTextCount.size > 1) {
+                    userTextCount.delete(user)
+                }
+            }
+
             // remove creator of last text from possible candidates
-            if (sheet.texts.length > 0) {
+            if (sheet.texts.length > 0 && userTextCount.size > 1) {
                 let lastText = sheet.texts[sheet.texts.length - 1];
                 userTextCount.delete(lastText.creator);
             }
 
             // remove also the creator of the text before the last text if more than 2 users are in the game
-            if (sheet.texts.length > 1 && game.users.length > 2) {
+            if (sheet.texts.length > 1 && userTextCount.size > 1) {
                 let prevLastText = sheet.texts[sheet.texts.length - 2];
                 userTextCount.delete(prevLastText.creator);
             }
 
             // remove also the last assigned creator (only available if assignTime is more than 24 hours ago)
-            if (sheet.nextUser && sheet.nextUser.length > 0 && userTextCount.size > 0) {
+            if (sheet.nextUser && sheet.nextUser.length > 0 && userTextCount.size > 1) {
                 userTextCount.delete(sheet.nextUser);
             }
 
@@ -436,6 +455,42 @@ class Manager {
                     }
                 }
             }
+        }
+    }
+
+    async excludeUser(gameId: number, username: string, force: boolean) {
+        if (!username)
+            throw 'missing username';
+        if (!this.games.has(gameId))
+            throw 'game not found';
+
+        username = username.toLowerCase();
+        let game = this.games.get(gameId);
+
+        if (game.users.indexOf(username) === -1)
+            throw 'user not in game';
+
+        let hours16Ago: number = new Date().getTime() - (16 * 3600 * 1000);
+        // find game where the user is assigned for more than 15 hours
+        let expiredSheets: Array<Sheet> = [];
+        for (let sheet of game.sheets) {
+            if (sheet.nextUser == username && (sheet.assignTime < hours16Ago || force)) {
+                expiredSheets.push(sheet);
+            }
+        }
+        if (expiredSheets.length === 0)
+            throw 'user has not expired yet';
+
+        if (game.expiredUsers.indexOf(username) === -1) {
+            game.expiredUsers.push(username);
+            console.log('added expired user ' + username + (force ? ' by force' : ''))
+        }
+        // language=SQLite
+        await this.db.run("UPDATE game_user SET excluded = 1 WHERE game_id = ? AND user = ?", gameId, username);
+
+        // re-assign next texts where the user was expired
+        for (let sheet of expiredSheets) {
+            Manager.assignNextTextCreator(game, sheet)
         }
     }
 }

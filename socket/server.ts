@@ -26,10 +26,14 @@ export function initWebSocketServer(http) {
 
         ws.on('message', (message: WebSocket.Data) => {
             // set the connection as alive on each pong or received message
+            try {
             sessions.get(ws).isAlive = true;
             console.log('received: %s', message);
             // handle request and send response
-            processMessage(JSON.parse(message.toString()), sessions.get(ws), ws);
+                processMessage(JSON.parse(message.toString()), sessions.get(ws), ws);
+            } catch (e) {
+                console.log(e)
+            }
         });
 
         ws.on('pong', () => {
@@ -138,6 +142,9 @@ async function handleRequest(request: SocketRequest, session: SessionData, ws: W
             break;
         case "setGameName":
             await DataManager.setGameName(request.gameId, request.name);
+            break;
+        case "excludeUser":
+            await DataManager.excludeUser(request.gameId, request.username, request.force);
             break;
         default:
             throw 'unknown action';
