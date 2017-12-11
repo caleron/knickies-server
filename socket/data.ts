@@ -198,6 +198,7 @@ class Manager {
             sheetCount,
             textCount,
             users,
+            expiredUsers: [],
             running: true,
             sheets: []
         };
@@ -449,7 +450,7 @@ class Manager {
         for (let game of this.games.values()) {
             if (game.running) {
                 for (let sheet of game.sheets) {
-                    if (sheet.assignTime < hours24Ago) {
+                    if (sheet.assignTime < hours24Ago && sheet.nextUser) {
                         console.log(`game ${game.id} sheet ${sheet.number}: user ${sheet.nextUser} expired`);
                         Manager.assignNextTextCreator(game, sheet)
                     }

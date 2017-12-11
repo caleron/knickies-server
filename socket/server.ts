@@ -27,9 +27,9 @@ export function initWebSocketServer(http) {
         ws.on('message', (message: WebSocket.Data) => {
             // set the connection as alive on each pong or received message
             try {
-            sessions.get(ws).isAlive = true;
-            console.log('received: %s', message);
-            // handle request and send response
+                sessions.get(ws).isAlive = true;
+                console.log('received from %s: %s', sessions.get(ws).user ? sessions.get(ws).user.name : 'unknown', message);
+                // handle request and send response
                 processMessage(JSON.parse(message.toString()), sessions.get(ws), ws);
             } catch (e) {
                 console.log(e)
